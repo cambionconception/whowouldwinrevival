@@ -1,0 +1,11 @@
+{
+  "name": "greatest-of-them-all",
+  "version": "1.0.0",
+  "description": "Head-to-head voting tournaments with Elo leaderboards",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
