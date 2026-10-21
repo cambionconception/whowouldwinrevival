@@ -7,6 +7,10 @@ let timer = null, draft = null, busy = false, flash = '', last = '';
 const tokens = () => { try { return JSON.parse(localStorage.getItem('gotaTokens') || '{}'); } catch (e) { return {}; } };
 const setToken = (id, t) => { try { const k = tokens(); k[id] = t; localStorage.setItem('gotaTokens', JSON.stringify(k)); } catch (e) {} };
 
+const adminKey = () => { try { return localStorage.getItem('gotaAdmin') || ''; } catch (e) { return ''; } };
+const canEdit = id => !!tokens()[id] || !!adminKey();
+const auth = id => ({ 'x-admin-key': adminKey(), 'x-delete-token': tokens()[id] || '' });
+
 async function api(path, opts = {}) {
   const r = await fetch('/api' + path, {
     method: opts.method || 'GET',
@@ -18,7 +22,7 @@ async function api(path, opts = {}) {
   return j;
 }
 const hdr = sub => `<header><h1>Tournaments</h1><div class="row">${sub || ''}</div></header>`;
-const editBtn = id => tokens()[id] ? btn('Edit', '#/t/' + id + '/edit') : '';
+const editBtn = id => canEdit(id) ? btn('Edit', '#/t/' + id + '/edit') : '';
 const btn = (label, href, cls = '') => `<a href="${href}"><button class="${cls}">${label}</button></a>`;
 
 /* ---------- images: square crop, 320px JPEG ---------- */
@@ -43,6 +47,8 @@ function shrink(file, n = 320) {
 function route() {
   clearInterval(timer);
   const h = location.hash.replace(/^#\/?/, '').split('/');
+  if (h[0] === 'owner') { const k = prompt('Owner key:'); if (k) { try { localStorage.setItem('gotaAdmin', k.trim()); } catch (e) {} } location.hash = '#/'; return; }
+  if (h[0] === 'owner-off') { try { localStorage.removeItem('gotaAdmin'); } catch (e) {} location.hash = '#/'; return; }
   if (h[0] === 'new') return showCreate();
   if (h[0] === 't' && h[1]) return h[2] === 'edit' ? showEdit(h[1]) : h[2] === 'board' ? showBoard(h[1]) : showPlay(h[1]);
   return showHome();
@@ -54,18 +60,18 @@ async function showHome() {
   const newBtn = btn('+ New tournament', '#/new', 'p');
   app.innerHTML = hdr(newBtn) + '<div class="card mute">Loading…</div>';
   try {
-    const list = (await api('/tournaments')).sort((a, b) => b.votes - a.votes || b.createdAt - a.createdAt);
+    const list = (await api('/tournaments')).sort((x, y) => y.votes - x.votes || y.createdAt - x.createdAt);
     const mine = tokens();
     app.innerHTML = hdr(newBtn) + (list.length ? `<div class="tgrid">${list.map(t => `
       <div class="tcard">
         <h3 title="${esc(t.name)}">${esc(t.name)}</h3>
         ${t.hasCover ? `<img class="tcover" src="/cover/${t.id}" alt="">` : '<div class="tcover none">No image</div>'}
         <div class="mute tmeta">${t.n} entries &middot; ${t.votes} votes</div>
-        <div class="tbtns">${btn('Vote', '#/t/' + t.id, 'p')}${btn('Leaderboard', '#/t/' + t.id + '/board')}${mine[t.id] ? btn('Edit', '#/t/' + t.id + '/edit') + `<button class="d" data-del="${t.id}">Delete</button>` : ''}</div>
+        <div class="tbtns">${btn('Vote', '#/t/' + t.id, 'p')}${btn('Leaderboard', '#/t/' + t.id + '/board')}${canEdit(t.id) ? btn('Edit', '#/t/' + t.id + '/edit') + `<button class="d" data-del="${t.id}">Delete</button>` : ''}</div>
       </div>`).join('')}</div>` : '<div class="card mute">No tournaments yet. Be the first to create one.</div>');
     app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (!confirm('Delete this tournament for everyone?')) return;
-      try { await api('/tournaments/' + b.dataset.del, { method: 'DELETE', headers: { 'x-delete-token': mine[b.dataset.del] } }); showHome(); }
+      try { await api('/tournaments/' + b.dataset.del, { method: 'DELETE', headers: auth(b.dataset.del) }); showHome(); }
       catch (e) { alert(e.message); }
     });
   } catch (e) { app.innerHTML = hdr() + `<div class="note">${esc(e.message)}</div>`; }
@@ -150,7 +156,7 @@ async function showBoard(id) {
 /* ---------- edit (creator only): rename + add entries, keeps all votes and Elo ---------- */
 let ed = null;
 async function showEdit(id) {
-  if (!tokens()[id]) { app.innerHTML = hdr() + '<div class="note">Only the browser that created this tournament can edit it.</div>'; return; }
+  if (!canEdit(id)) { app.innerHTML = hdr() + '<div class="note">Only the browser that created this tournament can edit it.</div>'; return; }
   if (!ed || ed.id !== id) {
     app.innerHTML = hdr() + '<div class="card mute">Loading…</div>';
     try {
@@ -194,7 +200,7 @@ function drawEdit() {
     if (!ed.name.trim()) return alert('Give the tournament a name.');
     busy = true; drawEdit();
     try {
-      await api('/tournaments/' + ed.id, { method: 'PUT', headers: { 'x-delete-token': tokens()[ed.id] },
+      await api('/tournaments/' + ed.id, { method: 'PUT', headers: auth(ed.id),
         body: { name: ed.name, cover: ed.cover, removeCover: ed.removeCover, rename: ed.items, add: ed.added.map(({ name, img }) => ({ name, img })) } });
       const id = ed.id; ed = null; busy = false; location.hash = '#/t/' + id + '/board';
     } catch (e) { busy = false; alert(e.message); drawEdit(); }
